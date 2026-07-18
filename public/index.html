@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Shabiki – Phone Browser</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: #0d0d0d;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    min-height: 100vh;
+    font-family: 'Segoe UI', sans-serif;
+    padding: 20px 0 40px;
+  }
+
+  .topbar {
+    width: 100%;
+    max-width: 480px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px 14px;
+  }
+  .topbar h1 { color:#fff; font-size:15px; font-weight:600; letter-spacing:.5px; }
+
+  #status {
+    font-size:12px;
+    padding:3px 10px;
+    border-radius:20px;
+    background:#1e1e1e;
+    color:#aaa;
+    border:1px solid #333;
+    transition: all .3s;
+  }
+  #status.connected { background:#0a3a0a; color:#4cff4c; border-color:#2a7a2a; }
+  #status.error     { background:#3a0a0a; color:#ff4c4c; border-color:#7a2a2a; }
+
+  /* Phone shell */
+  .phone-shell {
+    position: relative;
+    width: 412px;
+    border-radius: 50px;
+    background: linear-gradient(145deg, #2a2a2a, #111);
+    padding: 14px 12px;
+    box-shadow:
+      0 0 0 1px #3a3a3a,
+      0 0 0 3px #1a1a1a,
+      0 8px 60px rgba(0,0,0,.9),
+      inset 0 1px 0 rgba(255,255,255,.05);
+  }
+
+  .notch {
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 110px;
+    height: 28px;
+    background: #000;
+    border-radius: 0 0 18px 18px;
+    z-index: 10;
+  }
+
+  .btn-vol-up, .btn-vol-dn, .btn-power {
+    position: absolute;
+    background: #1f1f1f;
+    border-radius: 3px;
+  }
+  .btn-vol-up { left:-4px; top:100px; width:4px; height:32px; }
+  .btn-vol-dn { left:-4px; top:145px; width:4px; height:32px; }
+  .btn-power  { right:-4px; top:120px; width:4px; height:55px; }
+
+  /* Screen: noVNC injects its own canvas here */
+  .screen-wrap {
+    position: relative;
+    border-radius: 38px;
+    overflow: hidden;
+    background: #111;
+    width: 388px;
+    height: 840px;
+    margin: 0 auto;
+  }
+
+  /* noVNC canvas fills the screen area */
+  .screen-wrap canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  /* Click ripple overlay — sibling, not child, of screen content */
+  #click-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    pointer-events: none;
+    border-radius: 38px;
+    overflow: hidden;
+  }
+
+  .click-ripple {
+    position: absolute;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255,200,0,0.35);
+    border: 2px solid rgba(255,200,0,0.85);
+    transform: translate(-50%,-50%) scale(0);
+    animation: ripple .65s ease-out forwards;
+    pointer-events: none;
+  }
+  @keyframes ripple {
+    0%   { transform:translate(-50%,-50%) scale(0); opacity:1; }
+    100% { transform:translate(-50%,-50%) scale(2.2); opacity:0; }
+  }
+
+  .home-bar {
+    width: 130px;
+    height: 5px;
+    background: #444;
+    border-radius: 3px;
+    margin: 10px auto 2px;
+  }
+
+  /* Controls */
+  .controls {
+    margin-top: 16px;
+    width: 412px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .url-row { display:flex; gap:8px; }
+  #url-input {
+    flex: 1;
+    padding: 9px 12px;
+    border: 1px solid #333;
+    border-radius: 10px;
+    background: #1a1a1a;
+    color: #fff;
+    font-size: 13px;
+    outline: none;
+  }
+  #url-input:focus { border-color:#4cff4c; }
+  #url-go {
+    padding: 9px 16px;
+    border-radius: 10px;
+    background: #1a4a1a;
+    color: #4cff4c;
+    border: 1px solid #2a7a2a;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  #url-go:hover { background:#265a26; }
+
+  .ctrl-row { display:flex; gap:7px; }
+  .ctrl-btn {
+    flex: 1;
+    padding: 9px 4px;
+    border: 1px solid #2a2a2a;
+    border-radius: 10px;
+    background: #181818;
+    color: #ccc;
+    font-size: 11px;
+    cursor: pointer;
+    text-align: center;
+    transition: background .12s;
+    user-select: none;
+  }
+  .ctrl-btn:hover  { background:#242424; border-color:#444; }
+  .ctrl-btn:active { background:#0d2a0d; border-color:#4cff4c; color:#4cff4c; }
+
+  .coords-display {
+    font-size: 11px;
+    color: #444;
+    text-align: center;
+    padding: 3px 0;
+    font-family: monospace;
+    letter-spacing: .3px;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>📱 Shabiki VNC Browser</h1>
+  <span id="status">Connecting…</span>
+</div>
+
+<div class="phone-shell">
+  <div class="notch"></div>
+  <div class="btn-vol-up"></div>
+  <div class="btn-vol-dn"></div>
+  <div class="btn-power"></div>
+
+  <!-- noVNC injects its canvas here; no pre-existing canvas -->
+  <div class="screen-wrap" id="screen-wrap">
+    <div id="click-overlay"></div>
+  </div>
+
+  <div class="home-bar"></div>
+</div>
+
+<div class="controls">
+  <div class="url-row">
+    <input id="url-input" type="text" placeholder="https://shabiki.com" value="https://shabiki.com"/>
+    <button id="url-go" onclick="sendUrl()">Go</button>
+  </div>
+
+  <div class="ctrl-row">
+    <div class="ctrl-btn" onclick="sendKey('Back')">◀ Back</div>
+    <div class="ctrl-btn" onclick="sendKey('Forward')">▶ Fwd</div>
+    <div class="ctrl-btn" onclick="sendKey('Refresh')">↻ Reload</div>
+    <div class="ctrl-btn" onclick="sendKey('ScrollUp')">↑ Up</div>
+    <div class="ctrl-btn" onclick="sendKey('ScrollDown')">↓ Down</div>
+  </div>
+
+  <div class="ctrl-row">
+    <div class="ctrl-btn" onclick="sendKey('Home')">🏠 Home</div>
+    <div class="ctrl-btn" onclick="sendKey('Screenshot')">📸 Shot</div>
+    <div class="ctrl-btn" onclick="sendKey('Zoom+')">🔍+</div>
+    <div class="ctrl-btn" onclick="sendKey('Zoom-')">🔍−</div>
+  </div>
+
+  <div class="coords-display" id="coords">hover over screen · coordinates shown here</div>
+</div>
+
+<script type="module">
+import RFB from '/novnc/core/rfb.js';
+
+const statusEl = document.getElementById('status');
+const wrap     = document.getElementById('screen-wrap');
+const overlay  = document.getElementById('click-overlay');
+const coordsEl = document.getElementById('coords');
+
+function setStatus(text, cls) {
+  statusEl.textContent = text;
+  statusEl.className   = cls || '';
+}
+
+const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+const wsUrl   = `${wsProto}://${location.host}/websockify`;
+
+let rfb = null;
+
+function connect() {
+  setStatus('Connecting…');
+  try {
+    rfb = new RFB(wrap, wsUrl);
+
+    rfb.scaleViewport   = true;   // fill the container
+    rfb.resizeSession   = false;
+    rfb.viewOnly        = false;   // real input
+    rfb.qualityLevel    = 8;
+    rfb.compressionLevel = 2;
+
+    rfb.addEventListener('connect', () => {
+      setStatus('Connected ✓', 'connected');
+    });
+
+    rfb.addEventListener('disconnect', (e) => {
+      const clean = e.detail?.clean;
+      setStatus(clean ? 'Disconnected' : 'Lost connection – retrying…', 'error');
+      rfb = null;
+      setTimeout(connect, 2500);
+    });
+
+    rfb.addEventListener('credentialsrequired', () => {
+      rfb.sendCredentials({ password: '' });
+    });
+
+  } catch(err) {
+    setStatus('Error: ' + err.message, 'error');
+    setTimeout(connect, 3000);
+  }
+}
+
+connect();
+
+// ── Coordinate display + click ripple ──
+wrap.addEventListener('mousemove', (e) => {
+  const r = wrap.getBoundingClientRect();
+  const x = Math.round(e.clientX - r.left);
+  const y = Math.round(e.clientY - r.top);
+  coordsEl.textContent = `cursor  x=${x}  y=${y}`;
+});
+
+wrap.addEventListener('click', (e) => {
+  const r = wrap.getBoundingClientRect();
+  const x = Math.round(e.clientX - r.left);
+  const y = Math.round(e.clientY - r.top);
+
+  const dot = document.createElement('div');
+  dot.className = 'click-ripple';
+  dot.style.left = x + 'px';
+  dot.style.top  = y + 'px';
+  overlay.appendChild(dot);
+  setTimeout(() => dot.remove(), 700);
+
+  coordsEl.textContent = `clicked  x=${x}  y=${y}`;
+});
+
+window.sendUrl = function() {
+  const url = document.getElementById('url-input').value.trim();
+  if (!url) return;
+  fetch('/cmd/navigate?url=' + encodeURIComponent(url));
+};
+
+window.sendKey = function(action) {
+  fetch('/cmd/action?key=' + encodeURIComponent(action));
+};
+</script>
+</body>
+</html>
