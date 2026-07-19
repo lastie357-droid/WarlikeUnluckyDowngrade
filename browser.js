@@ -5,14 +5,17 @@
  */
 const { chromium: playwrightChromium } = require('playwright-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const net = require('net');
-const fs  = require('fs');
+const net  = require('net');
+const fs   = require('fs');
+const path = require('path');
 
 playwrightChromium.use(StealthPlugin());
 
 const DISPLAY       = process.env.DISPLAY || ':99';
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH || 'chromium';
 const CMD_SOCKET    = '/tmp/browser-cmd.sock';
+// All cookies, localStorage, IndexedDB saved here — persists across restarts
+const PROFILE_DIR   = path.join(__dirname, 'browser-profile');
 
 const PHONE_W = 390;
 const PHONE_H = 844;
@@ -86,33 +89,15 @@ ipc.listen(CMD_SOCKET, () => console.log('[ipc] Listening on', CMD_SOCKET));
 (async () => {
   console.log(`[browser] Launching stealth Chromium on DISPLAY=${DISPLAY}`);
 
-  const browser = await playwrightChromium.launch({
+  // Persistent context — saves cookies, localStorage, IndexedDB to disk
+  // so session is restored on every restart
+  fs.mkdirSync(PROFILE_DIR, { recursive: true });
+  console.log(`[browser] Profile dir: ${PROFILE_DIR}`);
+
+  const context = await playwrightChromium.launchPersistentContext(PROFILE_DIR, {
     executablePath: CHROMIUM_PATH,
     headless: false,
     env: { ...process.env, DISPLAY },
-    args: [
-      `--window-size=${PHONE_W},${PHONE_H}`,
-      '--window-position=0,0',
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-blink-features=AutomationControlled',
-      '--disable-features=IsolateOrigins,site-per-process',
-      '--disable-infobars',
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--disable-background-networking',
-      '--disable-sync',
-      '--disable-default-apps',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--mute-audio',
-      '--lang=en-US',
-      '--flag-switches-begin',
-      '--flag-switches-end',
-    ],
-  });
-
-  const context = await browser.newContext({
     viewport: { width: PHONE_W, height: PHONE_H },
     userAgent:
       'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 ' +
@@ -131,6 +116,24 @@ ipc.listen(CMD_SOCKET, () => console.log('[ipc] Listening on', CMD_SOCKET));
       'sec-ch-ua-mobile': '?1',
       'sec-ch-ua-platform': '"Android"',
     },
+    args: [
+      `--window-size=${PHONE_W},${PHONE_H}`,
+      '--window-position=0,0',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-blink-features=AutomationControlled',
+      '--disable-features=IsolateOrigins,site-per-process',
+      '--disable-infobars',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--disable-default-apps',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--mute-audio',
+      '--lang=en-US',
+    ],
   });
 
   // Extra stealth patches on top of the plugin
@@ -176,6 +179,7 @@ ipc.listen(CMD_SOCKET, () => console.log('[ipc] Listening on', CMD_SOCKET));
     console.error('[browser] Navigation error:', e.message);
   }
 
-  browser.on('disconnected', () => { console.error('[browser] Disconnected!'); process.exit(1); });
+  // launchPersistentContext returns a context (not a browser object)
+  context.on('close', () => { console.error('[browser] Context closed!'); process.exit(1); });
   await new Promise(() => {});
 })().catch((e) => { console.error('[browser] Fatal:', e.message); process.exit(1); });
