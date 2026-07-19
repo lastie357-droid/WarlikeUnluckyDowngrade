@@ -13,7 +13,14 @@ echo " Shabiki Phone VNC Browser"
 echo "===================================================="
 
 cleanup() {
-  echo "[start] Cleaning up..."
+  echo "[start] Shutting down gracefully..."
+  # SIGTERM browser.js first so it can close Chrome cleanly (saves session state)
+  pkill -TERM -f "node browser.js" 2>/dev/null || true
+  sleep 3
+  # Then stop the rest
+  pkill -TERM -f "node server.js" 2>/dev/null || true
+  pkill -TERM -f x11vnc            2>/dev/null || true
+  sleep 1
   kill 0 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM

@@ -85,14 +85,40 @@ const ipc = net.createServer((socket) => {
 });
 ipc.listen(CMD_SOCKET, () => console.log('[ipc] Listening on', CMD_SOCKET));
 
+// ── Graceful shutdown — close browser cleanly so Chrome saves session state
+// and does NOT show "Restore pages?" on the next launch ──
+let context_ref = null;   // set after launch
+async function gracefulShutdown(sig) {
+  console.log(`[browser] ${sig} — closing browser cleanly…`);
+  try {
+    if (context_ref) await context_ref.close();
+  } catch(e) { /* ignore */ }
+  process.exit(0);
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
+
 // ── Launch ──
 (async () => {
   console.log(`[browser] Launching stealth Chromium on DISPLAY=${DISPLAY}`);
 
   // Persistent context — saves cookies, localStorage, IndexedDB to disk
-  // so session is restored on every restart
   fs.mkdirSync(PROFILE_DIR, { recursive: true });
   console.log(`[browser] Profile dir: ${PROFILE_DIR}`);
+
+  // Delete Chromium's crash-state files so "Restore pages?" never appears.
+  // These files are re-created on each clean launch; deleting them before
+  // launch makes Chrome think there is nothing to restore.
+  const crashFiles = [
+    'Default/Current Session',
+    'Default/Current Tabs',
+    'Default/Last Session',
+    'Default/Last Tabs',
+  ];
+  for (const f of crashFiles) {
+    try { fs.unlinkSync(path.join(PROFILE_DIR, f)); } catch(e) { /* ok if missing */ }
+  }
+  console.log('[browser] Cleared crash-state files ✓');
 
   const context = await playwrightChromium.launchPersistentContext(PROFILE_DIR, {
     executablePath: CHROMIUM_PATH,
@@ -122,15 +148,30 @@ ipc.listen(CMD_SOCKET, () => console.log('[ipc] Listening on', CMD_SOCKET));
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-blink-features=AutomationControlled',
-      '--disable-features=IsolateOrigins,site-per-process',
+      // Disable features that block cross-origin iframes (Aviator game is iframed)
+      '--disable-features=IsolateOrigins,site-per-process,BlockInsecurePrivateNetworkRequests',
+      '--disable-web-security',
       '--disable-infobars',
       '--no-first-run',
       '--no-default-browser-check',
+      // Auto-restore last session silently — suppresses the "Restore pages?" dialog
+      '--restore-last-session',
+      '--disable-session-crashed-bubble',
+      '--suppress-message-center-popups',
       '--disable-background-networking',
       '--disable-sync',
       '--disable-default-apps',
       '--disable-dev-shm-usage',
-      '--disable-gpu',
+      // GPU: use SwiftShader software renderer so WebGL games (Aviator etc) work
+      '--use-gl=angle',
+      '--use-angle=swiftshader',
+      '--ignore-gpu-blocklist',
+      '--enable-gpu-rasterization',
+      '--enable-webgl',
+      '--enable-webgl2',
+      '--enable-accelerated-2d-canvas',
+      '--enable-unsafe-webgpu',
+      '--no-sandbox',
       '--mute-audio',
       '--lang=en-US',
     ],
@@ -166,20 +207,35 @@ ipc.listen(CMD_SOCKET, () => console.log('[ipc] Listening on', CMD_SOCKET));
     }
   });
 
-  page = await context.newPage();
-
-  console.log('[browser] Navigating to shabiki.com …');
-  try {
-    await page.goto('https://shabiki.com', {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000,
-    });
-    console.log('[browser] ✓ Loaded:', await page.title());
-  } catch(e) {
-    console.error('[browser] Navigation error:', e.message);
-  }
-
-  // launchPersistentContext returns a context (not a browser object)
+  context_ref = context;  // expose to shutdown handler
   context.on('close', () => { console.error('[browser] Context closed!'); process.exit(1); });
+
+  // Use existing page if session was restored, otherwise open new one
+  const pages = context.pages();
+  page = pages.find(p => p.url() !== 'about:blank') || pages[0] || await context.newPage();
+
+  // Dismiss the "Restore pages?" bubble if it appears (press Escape)
+  try {
+    await page.waitForTimeout(1200);
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+  } catch(e) { /* non-fatal */ }
+
+  // If the page is blank or about:blank, navigate to shabiki
+  const currentUrl = page.url();
+  if (!currentUrl || currentUrl === 'about:blank' || currentUrl === 'chrome://newtab/') {
+    console.log('[browser] Navigating to shabiki.com …');
+    try {
+      await page.goto('https://shabiki.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
+      console.log('[browser] ✓ Loaded:', await page.title());
+    } catch(e) {
+      console.error('[browser] Navigation error:', e.message);
+    }
+  } else {
+    console.log('[browser] ✓ Resumed session at:', currentUrl);
+    // Still dismiss any restore popup on the resumed page
+    try { await page.reload({ waitUntil: 'domcontentloaded', timeout: 20000 }); } catch(e) {}
+    console.log('[browser] ✓ Page title:', await page.title().catch(() => '?'));
+  }
   await new Promise(() => {});
 })().catch((e) => { console.error('[browser] Fatal:', e.message); process.exit(1); });
