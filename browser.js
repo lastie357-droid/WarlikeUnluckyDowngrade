@@ -58,7 +58,24 @@ const ipc = net.createServer((socket) => {
           case 'Zoom-':
             await page.evaluate(() => { document.body.style.zoom = Math.max(0.5, parseFloat(document.body.style.zoom||1)-0.1).toFixed(1); });
             break;
+          case 'Enter':      await page.keyboard.press('Enter'); break;
+          case 'Tab':        await page.keyboard.press('Tab');   break;
+          case 'Backspace':  await page.keyboard.press('Backspace'); break;
+          case 'Escape':     await page.keyboard.press('Escape'); break;
+          case 'ClearField':
+            await page.keyboard.press('Control+a');
+            await page.keyboard.press('Backspace');
+            break;
         }
+      }
+
+      // Type / paste text into focused input field
+      if (cmd.type === 'type') {
+        const text = cmd.text || '';
+        if (text.length === 0) return;
+        console.log('[browser] Typing:', JSON.stringify(text));
+        // click the focused element to ensure it's active, then type
+        await page.keyboard.type(text, { delay: 30 });
       }
     } catch(e) { console.error('[ipc] error:', e.message); }
   });

@@ -185,6 +185,122 @@
     font-family: monospace;
     letter-spacing: .3px;
   }
+
+  /* ── Keyboard panel ── */
+  .keyboard-panel {
+    background: #141414;
+    border: 1px solid #2a2a2a;
+    border-radius: 14px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .keyboard-label {
+    font-size: 11px;
+    color: #555;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+  }
+  .type-row {
+    display: flex;
+    gap: 7px;
+    align-items: flex-end;
+  }
+  #type-input {
+    flex: 1;
+    padding: 9px 12px;
+    border: 1px solid #333;
+    border-radius: 10px;
+    background: #1a1a1a;
+    color: #fff;
+    font-size: 14px;
+    outline: none;
+    resize: none;
+    min-height: 42px;
+    max-height: 100px;
+    font-family: 'Segoe UI', sans-serif;
+    line-height: 1.4;
+  }
+  #type-input:focus { border-color:#4cff4c; box-shadow: 0 0 0 2px rgba(76,255,76,.1); }
+  #type-input::placeholder { color:#444; }
+
+  .key-btn-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .type-send {
+    padding: 8px 14px;
+    border-radius: 9px;
+    background: #1a4a1a;
+    color: #4cff4c;
+    border: 1px solid #2a7a2a;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 700;
+    white-space: nowrap;
+    transition: background .12s;
+  }
+  .type-send:hover { background:#265a26; }
+  .type-send:active { background:#0d3a0d; }
+
+  .type-clear {
+    padding: 7px 14px;
+    border-radius: 9px;
+    background: #1e1e1e;
+    color: #888;
+    border: 1px solid #2a2a2a;
+    cursor: pointer;
+    font-size: 12px;
+    white-space: nowrap;
+    transition: background .12s;
+  }
+  .type-clear:hover { background:#282828; }
+
+  /* Quick-key chips */
+  .quick-keys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .qkey {
+    padding: 5px 11px;
+    border-radius: 7px;
+    background: #1c1c1c;
+    border: 1px solid #2a2a2a;
+    color: #aaa;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background .1s;
+    user-select: none;
+  }
+  .qkey:hover  { background:#242424; color:#ddd; border-color:#444; }
+  .qkey:active { background:#0d2a0d; color:#4cff4c; border-color:#4cff4c; }
+
+  /* Toast notification */
+  #toast {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: #1a4a1a;
+    color: #4cff4c;
+    border: 1px solid #2a7a2a;
+    border-radius: 20px;
+    padding: 8px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .25s, transform .25s;
+    z-index: 9999;
+  }
+  #toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 </style>
 </head>
 <body>
@@ -230,7 +346,37 @@
   </div>
 
   <div class="coords-display" id="coords">hover over screen · coordinates shown here</div>
+
+  <!-- ── Keyboard / Type panel ── -->
+  <div class="keyboard-panel">
+    <div class="keyboard-label">⌨️ Type into page</div>
+
+    <div class="type-row">
+      <textarea
+        id="type-input"
+        rows="1"
+        placeholder="Click a field on the screen, then type here and press Send…"
+        oninput="autoResize(this)"
+        onkeydown="handleTypeKey(event)"
+      ></textarea>
+      <div class="key-btn-group">
+        <button class="type-send" onclick="sendText()">Send ↵</button>
+        <button class="type-clear" onclick="clearText()">Clear</button>
+      </div>
+    </div>
+
+    <!-- Quick special keys -->
+    <div class="quick-keys">
+      <div class="qkey" onclick="sendKey('Enter')"    title="Press Enter">⏎ Enter</div>
+      <div class="qkey" onclick="sendKey('Tab')"      title="Press Tab">⇥ Tab</div>
+      <div class="qkey" onclick="sendKey('Backspace')" title="Backspace">⌫ Del</div>
+      <div class="qkey" onclick="sendKey('Escape')"   title="Escape">Esc</div>
+      <div class="qkey" onclick="sendKey('ClearField')" title="Select all + delete">✕ Clear Field</div>
+    </div>
+  </div>
 </div>
+
+<div id="toast"></div>
 
 <script type="module">
 import RFB from '/novnc/core/rfb.js';
@@ -316,6 +462,43 @@ window.sendUrl = function() {
 window.sendKey = function(action) {
   fetch('/cmd/action?key=' + encodeURIComponent(action));
 };
+
+// ── Keyboard panel helpers ──
+window.sendText = async function() {
+  const el   = document.getElementById('type-input');
+  const text = el.value;
+  if (!text) return;
+  await fetch('/cmd/type?text=' + encodeURIComponent(text));
+  showToast('Typed: ' + (text.length > 30 ? text.slice(0, 30) + '…' : text));
+  el.value = '';
+  autoResize(el);
+};
+
+window.clearText = function() {
+  const el = document.getElementById('type-input');
+  el.value = '';
+  autoResize(el);
+};
+
+window.autoResize = function(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 100) + 'px';
+};
+
+// Ctrl+Enter or Shift+Enter submits, plain Enter adds newline
+window.handleTypeKey = function(e) {
+  if (e.key === 'Enter' && (e.ctrlKey || e.shiftKey)) {
+    e.preventDefault();
+    sendText();
+  }
+};
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
 </script>
 </body>
 </html>

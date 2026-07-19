@@ -48,6 +48,13 @@ app.get('/cmd/action', (req, res) => {
   res.json({ ok: true, key });
 });
 
+app.get('/cmd/type', (req, res) => {
+  const text = req.query.text || '';
+  console.log('[cmd] Type:', JSON.stringify(text));
+  sendCmd({ type: 'type', text });
+  res.json({ ok: true, text });
+});
+
 // ── WebSocket → VNC TCP proxy (noVNC talks here) ──
 const wss = new WebSocketServer({ server, path: '/websockify' });
 
