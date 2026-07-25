@@ -40,8 +40,14 @@ const ipc = net.createServer((socket) => {
       if (cmd.type === 'navigate') {
         let url = cmd.url;
         if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        console.log('[browser] Navigated:', await page.title());
+        // Use 'load' so JS frameworks finish mounting before we return
+        try {
+          await page.goto(url, { waitUntil: 'load', timeout: 45000 });
+        } catch(navErr) {
+          // If full load times out, fall back to domcontentloaded result
+          console.warn('[browser] load timeout, page may be partially loaded:', navErr.message);
+        }
+        console.log('[browser] Navigated:', await page.title().catch(() => url));
       }
 
       if (cmd.type === 'action') {
@@ -227,20 +233,20 @@ const STEALTH_INIT = () => {
   const currentUrl = page.url();
 
   if (!currentUrl || currentUrl === 'about:blank' || currentUrl === 'chrome://newtab/') {
-    // Fresh start — navigate to shabiki.com
+    // Fresh start — navigate to shabiki.com and wait for full JS load
     console.log('[browser] Navigating to shabiki.com …');
     try {
-      await page.goto('https://shabiki.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.goto('https://shabiki.com', { waitUntil: 'load', timeout: 45000 });
       console.log('[browser] ✓ Loaded:', await page.title());
     } catch(e) {
-      console.error('[browser] Navigation error:', e.message);
-      // Non-fatal — the page may still be partially loaded; user can interact
+      console.warn('[browser] Navigation warn (page may still render):', e.message);
+      // Non-fatal — let the page continue loading in the background
     }
   } else {
     // Session restored — already on the right page, no navigation needed
     console.log('[browser] ✓ Session resumed at:', currentUrl);
     console.log('[browser] ✓ Page title:', await page.title().catch(() => '?'));
-    // Dismiss any stale dialogs that crept in (Cloudflare challenge, etc.)
+    // Dismiss any stale dialogs
     try { await page.keyboard.press('Escape'); } catch(e) { /* ignore */ }
   }
 

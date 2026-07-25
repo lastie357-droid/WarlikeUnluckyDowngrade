@@ -69,6 +69,11 @@ x11vnc \
   -noxdamage \
   -noxfixes \
   -nocursor \
+  -wait 20 \
+  -defer 20 \
+  -timeout 0 \
+  -sb 0 \
+  -threads \
   -quiet \
   -bg \
   -o /tmp/x11vnc.log
