@@ -19,9 +19,10 @@ const fs    = require('fs');
 const CACHE_FILE    = '/tmp/best-kenya-proxy.txt';
 const LIST_FILE     = '/tmp/kenya-proxies-working.txt';
 const CACHE_MAX_AGE = 25 * 60 * 1000;   // 25 min
-const TEST_URL      = 'https://www.google.com/generate_204'; // lightweight, always up
-const TEST_TIMEOUT  = 10;   // seconds (for curl)
-const MAX_PARALLEL  = 14;
+// Test against shabiki.com directly so only Cloudflare-passing proxies make it through
+const TEST_URL      = 'https://shabiki.com';
+const TEST_TIMEOUT  = 15;   // seconds (for curl)
+const MAX_PARALLEL  = 10;
 
 // ── Fetch text from a URL with a timeout ──
 function fetchText(url, timeoutMs = 12000) {
@@ -56,26 +57,47 @@ function parseProxies(text) {
   return out;
 }
 
+// ── Fetch Kenya proxies from ProxyScrape v4 JSON API (primary) ──
+async function fetchProxyScrapeV4() {
+  const url = 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=get_proxies&proxy_format=protocolipport&format=json&country=KE';
+  try {
+    const body = await fetchText(url, 15000);
+    const data = JSON.parse(body);
+    if (!Array.isArray(data.proxies)) return [];
+    return data.proxies
+      .filter(p => p.alive)
+      .sort((a, b) => (b.uptime || 0) - (a.uptime || 0))   // highest uptime first
+      .map(p => p.proxy);                                    // already "protocol://ip:port"
+  } catch (e) {
+    console.error('[proxy-finder] v4 API error:', e.message);
+    return [];
+  }
+}
+
 // ── Fetch all proxy candidates ──
 async function fetchAllProxies() {
+  // Primary: ProxyScrape v4 JSON — sorted by uptime, Kenya only
+  const v4 = await fetchProxyScrapeV4();
+  if (v4.length) {
+    console.log(`[proxy-finder] ProxyScrape v4: ${v4.length} Kenya proxies`);
+  }
+
+  // Fallback text sources for extra coverage
   const sources = [
-    'https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&country=ke&protocol=http,socks5&proxy_format=ipport&format=text&timeout=10000',
-    'https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&country=ke&protocol=socks4&proxy_format=ipport&format=text&timeout=10000',
+    'https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&country=ke&protocol=http,socks5&proxy_format=protocolipport&format=text&timeout=10000',
+    'https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&country=ke&protocol=socks4&proxy_format=protocolipport&format=text&timeout=10000',
     'https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/countries/KE/data.txt',
     'https://raw.githubusercontent.com/monosans/proxy-list/main/proxies_geolocation/http.txt',
-    'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt',
-    'https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt',
   ];
 
   const results = await Promise.allSettled(
     sources.map((url) => fetchText(url).catch(() => ''))
   );
 
-  const all = new Set();
+  const all = new Set(v4);   // seed with v4 results (already sorted by uptime)
   results.forEach((r, i) => {
     if (r.status !== 'fulfilled' || !r.value) return;
     let text = r.value;
-    // monosans annotated list — KE entries only
     if (sources[i].includes('monosans')) {
       text = text.split('\n').filter((l) => / KE[^A-Z]/.test(l) || /:KE/.test(l)).join('\n');
     }
@@ -90,23 +112,35 @@ async function fetchAllProxies() {
   return [...all];
 }
 
-// ── Test one proxy with curl (full HTTPS round-trip) ──
-// proxy is a full URL: http://ip:port  or  socks5://ip:port
+// ── Test one proxy with curl against shabiki.com ──
+// Returns false if the proxy times out, errors, or hits a Cloudflare hard block.
 function testProxy(proxy) {
   return new Promise((resolve) => {
+    const tmpFile = `/tmp/proxy-test-${process.pid}-${Math.random().toString(36).slice(2)}.html`;
     const args = [
       '--silent', '--show-error',
-      '--proxy', proxy,           // already has protocol prefix
+      '--proxy', proxy,
       '--max-time', String(TEST_TIMEOUT),
-      '--connect-timeout', '6',
+      '--connect-timeout', '7',
+      '-A', 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.7204.100 Mobile Safari/537.36',
       '--write-out', '%{http_code}',
-      '--output', '/dev/null',
+      '--output', tmpFile,
       TEST_URL,
     ];
-    execFile('curl', args, { timeout: (TEST_TIMEOUT + 2) * 1000 }, (err, stdout) => {
+    execFile('curl', args, { timeout: (TEST_TIMEOUT + 3) * 1000 }, (err, stdout) => {
+      let body = '';
+      try { body = fs.readFileSync(tmpFile, 'utf8'); } catch(_) {}
+      try { fs.unlinkSync(tmpFile); } catch(_) {}
+
       if (err) return resolve(false);
       const code = parseInt(stdout.trim(), 10);
-      resolve(code >= 200 && code < 400);
+      if (code < 200 || code >= 400) return resolve(false);
+
+      // Reject Cloudflare hard blocks — proxy IP is blacklisted
+      if (/you have been blocked/i.test(body) || /access denied/i.test(body)) {
+        return resolve(false);
+      }
+      resolve(true);
     });
   });
 }
@@ -147,12 +181,17 @@ async function testBatch(proxies) {
   let proxies = [];
   try { proxies = await fetchAllProxies(); } catch(e) { console.error('[proxy-finder] Fetch error:', e.message); }
 
-  // Shuffle for fair sampling
+  // De-duplicate preserving order (v4 uptime-sorted proxies come first)
   proxies = [...new Set(proxies)];
-  for (let i = proxies.length - 1; i > 0; i--) {
+  // Only shuffle the tail (extras beyond the v4 set) so best proxies stay up front
+  const v4Count = Math.min(proxies.length, 10); // v4 returned at most ~10 KE proxies
+  const head = proxies.slice(0, v4Count);
+  const tail = proxies.slice(v4Count);
+  for (let i = tail.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [proxies[i], proxies[j]] = [proxies[j], proxies[i]];
+    [tail[i], tail[j]] = [tail[j], tail[i]];
   }
+  proxies = [...head, ...tail];
 
   console.log(`[proxy-finder] Testing ${proxies.length} proxies via curl (max parallel: ${MAX_PARALLEL})…`);
 
