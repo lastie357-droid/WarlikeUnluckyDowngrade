@@ -80,7 +80,17 @@ x11vnc \
 sleep 1
 echo "[x11vnc] VNC server on port ${VNC_PORT} ✓"
 
-# 3. Launch Chromium via browser.js
+# 3. Find best Kenya proxy (runs in foreground, writes /tmp/best-kenya-proxy.txt)
+echo "[proxy] Searching for working Kenya proxies..."
+node proxy-finder.js || true
+if [ -s /tmp/best-kenya-proxy.txt ]; then
+  BEST_PROXY=$(cat /tmp/best-kenya-proxy.txt)
+  echo "[proxy] Best proxy: ${BEST_PROXY}"
+else
+  echo "[proxy] No working proxy found — connecting directly"
+fi
+
+# 4. Launch Chromium via browser.js
 echo "[browser] Launching Chromium at shabiki.com..."
 DISPLAY="${DISPLAY}" \
 CHROMIUM_PATH="${CHROMIUM}" \
