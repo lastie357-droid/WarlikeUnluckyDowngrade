@@ -27,6 +27,57 @@ const PHONE_H = 844;
 
 let page;
 
+// ── Cloudflare challenge helpers ──
+
+// Wait for a Cloudflare JS challenge to auto-resolve on a page.
+// Stealth plugin handles the actual solving; we just give it time.
+async function waitForCloudflareClear(targetPage, label) {
+  const MAX_WAIT_MS = 18000;
+  const POLL_MS     = 1500;
+  const start       = Date.now();
+
+  while (Date.now() - start < MAX_WAIT_MS) {
+    let title = '';
+    let body  = '';
+    try {
+      title = await targetPage.title();
+      body  = await targetPage.evaluate(() => document.body?.innerText?.slice(0, 600) || '');
+    } catch(_) { break; } // page navigated away — challenge solved
+
+    const isChallenge =
+      /Just a moment|Checking your browser|Please wait/i.test(title) ||
+      /checking your browser|enable JavaScript|DDoS protection/i.test(body);
+
+    if (!isChallenge) {
+      console.log(`[browser] CF clear for ${label}: "${title}"`);
+      return true;
+    }
+    console.log(`[browser] CF challenge on ${label} — waiting…`);
+    await targetPage.waitForTimeout(POLL_MS).catch(() => {});
+  }
+
+  console.warn(`[browser] CF challenge did not clear for ${label} after ${MAX_WAIT_MS}ms`);
+  return false;
+}
+
+// Navigate with Cloudflare challenge handling.
+async function navigateSafe(targetPage, url) {
+  try {
+    await targetPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 40000 });
+  } catch(e) {
+    console.warn('[browser] goto warn (may still render):', e.message);
+  }
+
+  // Check if we landed on a challenge page
+  let title = '';
+  try { title = await targetPage.title(); } catch(_) {}
+  if (/Just a moment|Checking your browser|Please wait/i.test(title)) {
+    await waitForCloudflareClear(targetPage, url);
+  } else {
+    console.log(`[browser] Navigated: "${title}"`);
+  }
+}
+
 // ── IPC server — receives commands from server.js ──
 if (fs.existsSync(CMD_SOCKET)) fs.unlinkSync(CMD_SOCKET);
 
@@ -42,12 +93,7 @@ const ipc = net.createServer((socket) => {
       if (cmd.type === 'navigate') {
         let url = cmd.url;
         if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-        try {
-          await page.goto(url, { waitUntil: 'load', timeout: 45000 });
-        } catch(navErr) {
-          console.warn('[browser] load timeout, page may be partially loaded:', navErr.message);
-        }
-        console.log('[browser] Navigated:', await page.title().catch(() => url));
+        await navigateSafe(page, url);
       }
 
       if (cmd.type === 'action') {
@@ -653,6 +699,17 @@ async function tryLaunch(proxyUrl) {
 
   context_ref = context;
   context.on('close', () => { console.error('[browser] Context closed!'); process.exit(1); });
+
+  // ── Mid-session Cloudflare challenge watcher ──
+  // Fires whenever the user clicks a link or the page navigates inside the VNC browser.
+  page.on('load', async () => {
+    let title = '';
+    try { title = await page.title(); } catch(_) { return; }
+    if (/Just a moment|Checking your browser|Please wait/i.test(title)) {
+      console.log(`[browser] Mid-session CF challenge on "${page.url()}" — auto-waiting…`);
+      await waitForCloudflareClear(page, page.url());
+    }
+  });
 
   // Keep the process alive
   await new Promise(() => {});
