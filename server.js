@@ -27,6 +27,7 @@ app.use('/novnc', express.static(path.join(__dirname, 'node_modules/@novnc/novnc
 function sendCmd(cmd) {
   try {
     const client = net.createConnection(CMD_SOCKET);
+    client.on('error', (e) => console.error('[cmd] IPC error:', e.message));
     client.write(JSON.stringify(cmd));
     client.end();
   } catch(e) {
