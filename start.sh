@@ -12,24 +12,40 @@ echo "===================================================="
 echo " Shabiki Phone VNC Browser"
 echo "===================================================="
 
+# ── Install / update Node dependencies ──
+echo "[setup] Checking Node.js dependencies..."
+if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then
+  echo "[setup] Running npm install..."
+  npm install --prefer-offline 2>&1 | grep -v "^npm notice"
+  echo "[setup] Dependencies ready ✓"
+else
+  echo "[setup] node_modules up to date ✓"
+fi
+
+# ── Cleanup — guard against re-entry (kill 0 would re-trigger EXIT) ──
+_CLEANING=0
 cleanup() {
+  [ "$_CLEANING" -eq 1 ] && return
+  _CLEANING=1
   echo "[start] Shutting down gracefully..."
-  # SIGTERM browser.js first so it can close Chrome cleanly (saves session state)
+  # SIGTERM browser.js first so Chrome can write session state to disk
   pkill -TERM -f "node browser.js" 2>/dev/null || true
-  sleep 3
-  # Then stop the rest
+  sleep 2
   pkill -TERM -f "node server.js" 2>/dev/null || true
   pkill -TERM -f x11vnc            2>/dev/null || true
+  pkill -TERM -f "Xvfb :${DISPLAY_NUM}" 2>/dev/null || true
   sleep 1
-  kill 0 2>/dev/null || true
+  # Force-kill anything still running
+  pkill -KILL -f "node browser.js" 2>/dev/null || true
+  pkill -KILL -f "node server.js"  2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
-# Kill stale
-pkill -f "Xvfb :${DISPLAY_NUM}" 2>/dev/null || true
-pkill -f x11vnc                  2>/dev/null || true
-pkill -f "node browser.js"       2>/dev/null || true
-pkill -f "node server.js"        2>/dev/null || true
+# Kill any stale processes from a previous run
+pkill -KILL -f "Xvfb :${DISPLAY_NUM}" 2>/dev/null || true
+pkill -KILL -f x11vnc                  2>/dev/null || true
+pkill -KILL -f "node browser.js"       2>/dev/null || true
+pkill -KILL -f "node server.js"        2>/dev/null || true
 rm -f /tmp/browser-cmd.sock
 sleep 1
 
@@ -66,8 +82,6 @@ CHROMIUM_PATH="${CHROMIUM}" \
 node browser.js &
 sleep 4
 
-# 4. Start Express + WS proxy
+# 4. Start Express + WS proxy (runs in foreground — script exits when server exits)
 echo "[server] Starting web server on port 5000..."
 node server.js
-
-# server.js runs in foreground; script ends when server dies
