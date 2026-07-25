@@ -47,6 +47,13 @@ app.get('/cmd/type', (req, res) => {
   res.json({ ok: true, text });
 });
 
+app.get('/cmd/tap', (req, res) => {
+  const x = parseInt(req.query.x, 10) || 0;
+  const y = parseInt(req.query.y, 10) || 0;
+  sendCmd({ type: 'tap', x, y });
+  res.json({ ok: true, x, y });
+});
+
 // ── WebSocket → VNC TCP proxy ──
 // When x11vnc drops the TCP connection (e.g. during heavy page loads),
 // we reconnect internally so the browser client never sees a disconnect.

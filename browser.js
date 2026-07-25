@@ -50,6 +50,13 @@ const ipc = net.createServer((socket) => {
         console.log('[browser] Navigated:', await page.title().catch(() => url));
       }
 
+      if (cmd.type === 'tap') {
+        const x = Math.round(cmd.x);
+        const y = Math.round(cmd.y);
+        console.log(`[browser] Touch tap: ${x},${y}`);
+        await page.touchscreen.tap(x, y);
+      }
+
       if (cmd.type === 'action') {
         switch (cmd.key) {
           case 'Back':       await page.goBack();   break;
