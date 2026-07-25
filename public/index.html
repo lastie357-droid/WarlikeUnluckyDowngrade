@@ -327,22 +327,22 @@
 <div class="controls">
   <div class="url-row">
     <input id="url-input" type="text" placeholder="https://shabiki.com" value="https://shabiki.com"/>
-    <button id="url-go">Go</button>
+    <button id="url-go" onclick="sendUrl()">Go</button>
   </div>
 
   <div class="ctrl-row">
-    <div class="ctrl-btn" data-key="Back">◀ Back</div>
-    <div class="ctrl-btn" data-key="Forward">▶ Fwd</div>
-    <div class="ctrl-btn" data-key="Refresh">↻ Reload</div>
-    <div class="ctrl-btn" data-key="ScrollUp">↑ Up</div>
-    <div class="ctrl-btn" data-key="ScrollDown">↓ Down</div>
+    <div class="ctrl-btn" onclick="sendKey('Back')">◀ Back</div>
+    <div class="ctrl-btn" onclick="sendKey('Forward')">▶ Fwd</div>
+    <div class="ctrl-btn" onclick="sendKey('Refresh')">↻ Reload</div>
+    <div class="ctrl-btn" onclick="sendKey('ScrollUp')">↑ Up</div>
+    <div class="ctrl-btn" onclick="sendKey('ScrollDown')">↓ Down</div>
   </div>
 
   <div class="ctrl-row">
-    <div class="ctrl-btn" data-key="Home">🏠 Home</div>
-    <div class="ctrl-btn" data-key="Screenshot">📸 Shot</div>
-    <div class="ctrl-btn" data-key="Zoom+">🔍+</div>
-    <div class="ctrl-btn" data-key="Zoom-">🔍−</div>
+    <div class="ctrl-btn" onclick="sendKey('Home')">🏠 Home</div>
+    <div class="ctrl-btn" onclick="sendKey('Screenshot')">📸 Shot</div>
+    <div class="ctrl-btn" onclick="sendKey('Zoom+')">🔍+</div>
+    <div class="ctrl-btn" onclick="sendKey('Zoom-')">🔍−</div>
   </div>
 
   <div class="coords-display" id="coords">hover over screen · coordinates shown here</div>
@@ -356,20 +356,22 @@
         id="type-input"
         rows="1"
         placeholder="Click a field on the screen, then type here and press Send…"
+        oninput="autoResize(this)"
+        onkeydown="handleTypeKey(event)"
       ></textarea>
       <div class="key-btn-group">
-        <button class="type-send" id="type-send-btn">Send ↵</button>
-        <button class="type-clear" id="type-clear-btn">Clear</button>
+        <button class="type-send" onclick="sendText()">Send ↵</button>
+        <button class="type-clear" onclick="clearText()">Clear</button>
       </div>
     </div>
 
     <!-- Quick special keys -->
     <div class="quick-keys">
-      <div class="qkey" data-key="Enter"      title="Press Enter">⏎ Enter</div>
-      <div class="qkey" data-key="Tab"        title="Press Tab">⇥ Tab</div>
-      <div class="qkey" data-key="Backspace"  title="Backspace">⌫ Del</div>
-      <div class="qkey" data-key="Escape"     title="Escape">Esc</div>
-      <div class="qkey" data-key="ClearField" title="Select all + delete">✕ Clear Field</div>
+      <div class="qkey" onclick="sendKey('Enter')"    title="Press Enter">⏎ Enter</div>
+      <div class="qkey" onclick="sendKey('Tab')"      title="Press Tab">⇥ Tab</div>
+      <div class="qkey" onclick="sendKey('Backspace')" title="Backspace">⌫ Del</div>
+      <div class="qkey" onclick="sendKey('Escape')"   title="Escape">Esc</div>
+      <div class="qkey" onclick="sendKey('ClearField')" title="Select all + delete">✕ Clear Field</div>
     </div>
   </div>
 </div>
@@ -451,58 +453,45 @@ wrap.addEventListener('click', (e) => {
   coordsEl.textContent = `clicked  x=${x}  y=${y}`;
 });
 
-// ── URL bar ──
-function sendUrl() {
+window.sendUrl = function() {
   const url = document.getElementById('url-input').value.trim();
   if (!url) return;
   fetch('/cmd/navigate?url=' + encodeURIComponent(url));
-}
+};
 
-document.getElementById('url-go').addEventListener('click', sendUrl);
-document.getElementById('url-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') sendUrl();
-});
-
-// ── Control buttons (data-key attribute) ──
-function sendKey(action) {
+window.sendKey = function(action) {
   fetch('/cmd/action?key=' + encodeURIComponent(action));
-}
-
-document.querySelectorAll('[data-key]').forEach((el) => {
-  el.addEventListener('click', () => sendKey(el.dataset.key));
-});
+};
 
 // ── Keyboard panel helpers ──
-const typeInput = document.getElementById('type-input');
-
-function autoResize(el) {
-  el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 100) + 'px';
-}
-
-async function sendText() {
-  const text = typeInput.value;
+window.sendText = async function() {
+  const el   = document.getElementById('type-input');
+  const text = el.value;
   if (!text) return;
   await fetch('/cmd/type?text=' + encodeURIComponent(text));
   showToast('Typed: ' + (text.length > 30 ? text.slice(0, 30) + '…' : text));
-  typeInput.value = '';
-  autoResize(typeInput);
-}
+  el.value = '';
+  autoResize(el);
+};
 
-typeInput.addEventListener('input',   () => autoResize(typeInput));
-typeInput.addEventListener('keydown', (e) => {
-  // Ctrl+Enter or Shift+Enter submits, plain Enter adds newline
+window.clearText = function() {
+  const el = document.getElementById('type-input');
+  el.value = '';
+  autoResize(el);
+};
+
+window.autoResize = function(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 100) + 'px';
+};
+
+// Ctrl+Enter or Shift+Enter submits, plain Enter adds newline
+window.handleTypeKey = function(e) {
   if (e.key === 'Enter' && (e.ctrlKey || e.shiftKey)) {
     e.preventDefault();
     sendText();
   }
-});
-
-document.getElementById('type-send-btn').addEventListener('click',  sendText);
-document.getElementById('type-clear-btn').addEventListener('click', () => {
-  typeInput.value = '';
-  autoResize(typeInput);
-});
+};
 
 function showToast(msg) {
   const t = document.getElementById('toast');

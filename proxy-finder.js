@@ -18,12 +18,12 @@ const fs    = require('fs');
 
 const CACHE_FILE    = '/tmp/best-kenya-proxy.txt';
 const LIST_FILE     = '/tmp/kenya-proxies-working.txt';
-const CACHE_MAX_AGE = 2 * 60 * 60 * 1000; // 2 hours
+const CACHE_MAX_AGE = 25 * 60 * 1000;   // 25 min
 // Test against a subpage — the root often passes even on blocked proxies,
 // but /login reveals whether Cloudflare will block navigation too
 const TEST_URL      = 'https://shabiki.com/login';
-const TEST_TIMEOUT  = 8;    // seconds (for curl) — fail fast
-const MAX_PARALLEL  = 20;   // more parallel workers = faster scan
+const TEST_TIMEOUT  = 15;   // seconds (for curl)
+const MAX_PARALLEL  = 10;
 
 // ── Fetch text from a URL with a timeout ──
 function fetchText(url, timeoutMs = 12000) {
@@ -122,7 +122,7 @@ function testProxy(proxy) {
       '--silent', '--show-error',
       '--proxy', proxy,
       '--max-time', String(TEST_TIMEOUT),
-      '--connect-timeout', '4',
+      '--connect-timeout', '7',
       '-A', 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.7204.100 Mobile Safari/537.36',
       '--write-out', '%{http_code}',
       '--output', tmpFile,

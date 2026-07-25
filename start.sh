@@ -52,7 +52,7 @@ sleep 1
 # 1. Start Xvfb
 echo "[xvfb] Starting display ${DISPLAY} at ${PHONE_W}x${PHONE_H}x24..."
 Xvfb "${DISPLAY}" -screen 0 "${PHONE_W}x${PHONE_H}x24" -ac -nolisten tcp &
-sleep 1
+sleep 2
 
 xdpyinfo -display "${DISPLAY}" >/dev/null 2>&1 \
   && echo "[xvfb] Display ${DISPLAY} ready ✓" \
@@ -77,24 +77,17 @@ x11vnc \
   -quiet \
   -bg \
   -o /tmp/x11vnc.log
+sleep 1
 echo "[x11vnc] VNC server on port ${VNC_PORT} ✓"
 
-# 3. Proxy strategy: use cache immediately if available, refresh in background.
-#    If no cache, wait up to 30 s for proxy-finder before launching Chromium.
-PROXY_CACHE=/tmp/best-kenya-proxy.txt
-if [ -s "${PROXY_CACHE}" ]; then
-  BEST_PROXY=$(cat "${PROXY_CACHE}")
-  echo "[proxy] Cached proxy found: ${BEST_PROXY} — refreshing in background…"
-  node proxy-finder.js &
+# 3. Find best Kenya proxy (runs in foreground, writes /tmp/best-kenya-proxy.txt)
+echo "[proxy] Searching for working Kenya proxies..."
+node proxy-finder.js || true
+if [ -s /tmp/best-kenya-proxy.txt ]; then
+  BEST_PROXY=$(cat /tmp/best-kenya-proxy.txt)
+  echo "[proxy] Best proxy: ${BEST_PROXY}"
 else
-  echo "[proxy] No cached proxy — searching (max 30 s)…"
-  timeout 30 node proxy-finder.js || true
-  if [ -s "${PROXY_CACHE}" ]; then
-    BEST_PROXY=$(cat "${PROXY_CACHE}")
-    echo "[proxy] Best proxy: ${BEST_PROXY}"
-  else
-    echo "[proxy] No working proxy found — connecting directly"
-  fi
+  echo "[proxy] No working proxy found — connecting directly"
 fi
 
 # 4. Launch Chromium via browser.js
@@ -102,7 +95,7 @@ echo "[browser] Launching Chromium at shabiki.com..."
 DISPLAY="${DISPLAY}" \
 CHROMIUM_PATH="${CHROMIUM}" \
 node browser.js &
-sleep 1
+sleep 2
 
 # 4. Start Express + WS proxy (runs in foreground — script exits when server exits)
 echo "[server] Starting web server on port 5000..."
