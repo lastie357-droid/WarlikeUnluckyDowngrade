@@ -606,8 +606,8 @@ async function tryLaunch(proxyUrl) {
     // Cloudflare JS challenge is OK — stealth should pass it
     if (/Just a moment/i.test(title) || /Checking your browser/i.test(bodyText)) {
       console.log(`[browser] Cloudflare JS challenge via ${label} — stealth will handle it`);
-      // Wait a few seconds for challenge to auto-resolve
-      await p.waitForTimeout(5000).catch(() => {});
+      // Use event-driven wait instead of a fixed sleep
+      await waitForCloudflareClear(p, label);
     }
 
     console.log(`[browser] ✓ Loaded via ${label}: "${title}" @ https://shabiki.com/`);
