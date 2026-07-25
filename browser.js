@@ -30,34 +30,26 @@ let page;
 // ── Cloudflare challenge helpers ──
 
 // Wait for a Cloudflare JS challenge to auto-resolve on a page.
-// Stealth plugin handles the actual solving; we just give it time.
+// Uses waitForFunction (event-driven, not poll-loop) for minimum latency.
 async function waitForCloudflareClear(targetPage, label) {
-  const MAX_WAIT_MS = 18000;
-  const POLL_MS     = 1500;
-  const start       = Date.now();
-
-  while (Date.now() - start < MAX_WAIT_MS) {
-    let title = '';
-    let body  = '';
-    try {
-      title = await targetPage.title();
-      body  = await targetPage.evaluate(() => document.body?.innerText?.slice(0, 600) || '');
-    } catch(_) { break; } // page navigated away — challenge solved
-
-    const isChallenge =
-      /Just a moment|Checking your browser|Please wait/i.test(title) ||
-      /checking your browser|enable JavaScript|DDoS protection/i.test(body);
-
-    if (!isChallenge) {
-      console.log(`[browser] CF clear for ${label}: "${title}"`);
-      return true;
-    }
-    console.log(`[browser] CF challenge on ${label} — waiting…`);
-    await targetPage.waitForTimeout(POLL_MS).catch(() => {});
+  console.log(`[browser] CF challenge on "${label}" — waiting for auto-resolve…`);
+  try {
+    await targetPage.waitForFunction(
+      () => {
+        const t = document.title || '';
+        const b = document.body?.innerText?.slice(0, 400) || '';
+        return !/Just a moment|Checking your browser|Please wait/i.test(t) &&
+               !/checking your browser|enable JavaScript|DDoS protection/i.test(b);
+      },
+      { timeout: 15000, polling: 500 }
+    );
+    const title = await targetPage.title().catch(() => '');
+    console.log(`[browser] CF cleared for "${label}": "${title}"`);
+    return true;
+  } catch(_) {
+    console.warn(`[browser] CF challenge did not clear for "${label}" within 15s`);
+    return false;
   }
-
-  console.warn(`[browser] CF challenge did not clear for ${label} after ${MAX_WAIT_MS}ms`);
-  return false;
 }
 
 // Navigate with Cloudflare challenge handling.
@@ -131,7 +123,7 @@ const ipc = net.createServer((socket) => {
         const text = cmd.text || '';
         if (text.length === 0) return;
         console.log('[browser] Typing:', JSON.stringify(text));
-        await page.keyboard.type(text, { delay: 30 });
+        await page.keyboard.type(text, { delay: 10 });
       }
     } catch(e) { console.error('[ipc] error:', e.message); }
   });
@@ -164,7 +156,7 @@ const CHROMIUM_ARGS = [
   '--suppress-message-center-popups',
   '--noerrdialogs',
   '--hide-crash-restore-bubble',
-  '--disable-background-networking',
+  '--enable-features=NetworkServiceInProcess2',
   '--disable-sync',
   '--disable-default-apps',
   '--disable-dev-shm-usage',
@@ -616,24 +608,6 @@ async function tryLaunch(proxyUrl) {
       console.log(`[browser] Cloudflare JS challenge via ${label} — stealth will handle it`);
       // Wait a few seconds for challenge to auto-resolve
       await p.waitForTimeout(5000).catch(() => {});
-    }
-
-    // ── Second-pass check: verify subpage navigation also works ──
-    // Some proxies pass the root but Cloudflare 403s all subpages.
-    try {
-      await p.goto('https://shabiki.com/login', { waitUntil: 'domcontentloaded', timeout: 20000 });
-      const loginBody = await p.evaluate(() => document.body?.innerText || '').catch(() => '');
-      if (/you have been blocked/i.test(loginBody) || /Access denied/i.test(await p.title().catch(() => ''))) {
-        console.warn(`[browser] Proxy ${label} → Cloudflare blocks subpages — trying next proxy`);
-        try { await context.close(); } catch(_) {}
-        context_ref = null;
-        return null;
-      }
-      // Navigate back to homepage after the check
-      await p.goto('https://shabiki.com', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-    } catch(_) {
-      // Subpage check failed — still usable, just log it
-      console.warn(`[browser] Subpage check failed for ${label} (continuing anyway)`);
     }
 
     console.log(`[browser] ✓ Loaded via ${label}: "${title}" @ https://shabiki.com/`);

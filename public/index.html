@@ -404,8 +404,8 @@ function connect() {
     rfb.scaleViewport   = true;   // fill the container
     rfb.resizeSession   = false;
     rfb.viewOnly        = false;   // real input
-    rfb.qualityLevel    = 8;
-    rfb.compressionLevel = 2;
+    rfb.qualityLevel    = 6;
+    rfb.compressionLevel = 1;
 
     rfb.addEventListener('connect', () => {
       setStatus('Connected ✓', 'connected');

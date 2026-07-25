@@ -95,7 +95,7 @@ echo "[browser] Launching Chromium at shabiki.com..."
 DISPLAY="${DISPLAY}" \
 CHROMIUM_PATH="${CHROMIUM}" \
 node browser.js &
-sleep 4
+sleep 2
 
 # 4. Start Express + WS proxy (runs in foreground — script exits when server exits)
 echo "[server] Starting web server on port 5000..."
