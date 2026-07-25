@@ -93,15 +93,14 @@
     height: 100% !important;
   }
 
-  /* Click ripple overlay — intercepts clicks and routes them as touch taps */
+  /* Click ripple overlay — sibling, not child, of screen content */
   #click-overlay {
     position: absolute;
     inset: 0;
     z-index: 20;
-    pointer-events: auto;
+    pointer-events: none;
     border-radius: 38px;
     overflow: hidden;
-    cursor: pointer;
   }
 
   .click-ripple {
@@ -431,11 +430,7 @@ function connect() {
 
 connect();
 
-// VNC resolution (must match browser.js PHONE_W/PHONE_H)
-const VNC_W = 390;
-const VNC_H = 844;
-
-// ── Coordinate display (on the wrap, behind overlay) ──
+// ── Coordinate display + click ripple ──
 wrap.addEventListener('mousemove', (e) => {
   const r = wrap.getBoundingClientRect();
   const x = Math.round(e.clientX - r.left);
@@ -443,47 +438,20 @@ wrap.addEventListener('mousemove', (e) => {
   coordsEl.textContent = `cursor  x=${x}  y=${y}`;
 });
 
-// ── Click overlay: intercept clicks → Playwright touchscreen.tap() ──
-// This fires real touch events inside Chromium instead of X11 mouse clicks,
-// which is required for mobile-optimised sites (touch listeners only).
-overlay.addEventListener('click', (e) => {
-  e.stopPropagation();
-  const r = overlay.getBoundingClientRect();
-  const cssX = e.clientX - r.left;
-  const cssY = e.clientY - r.top;
+wrap.addEventListener('click', (e) => {
+  const r = wrap.getBoundingClientRect();
+  const x = Math.round(e.clientX - r.left);
+  const y = Math.round(e.clientY - r.top);
 
-  // Scale CSS coords → VNC resolution
-  const vncX = Math.round(cssX * (VNC_W / r.width));
-  const vncY = Math.round(cssY * (VNC_H / r.height));
-
-  // Send as touch tap through Playwright
-  fetch(`/cmd/tap?x=${vncX}&y=${vncY}`);
-
-  // Ripple at CSS position
   const dot = document.createElement('div');
   dot.className = 'click-ripple';
-  dot.style.left = cssX + 'px';
-  dot.style.top  = cssY + 'px';
+  dot.style.left = x + 'px';
+  dot.style.top  = y + 'px';
   overlay.appendChild(dot);
   setTimeout(() => dot.remove(), 700);
 
-  coordsEl.textContent = `tapped  x=${vncX}  y=${vncY}`;
-
-  // Keep VNC canvas focused so keyboard still works
-  const canvas = wrap.querySelector('canvas');
-  if (canvas) canvas.focus();
+  coordsEl.textContent = `clicked  x=${x}  y=${y}`;
 });
-
-// ── Forward scroll from overlay → VNC canvas ──
-overlay.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  const canvas = wrap.querySelector('canvas');
-  if (canvas) canvas.dispatchEvent(new WheelEvent('wheel', {
-    bubbles: true, cancelable: true,
-    deltaX: e.deltaX, deltaY: e.deltaY, deltaMode: e.deltaMode,
-    clientX: e.clientX, clientY: e.clientY,
-  }));
-}, { passive: false });
 
 window.sendUrl = function() {
   const url = document.getElementById('url-input').value.trim();

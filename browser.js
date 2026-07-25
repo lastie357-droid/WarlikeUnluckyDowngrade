@@ -50,13 +50,6 @@ const ipc = net.createServer((socket) => {
         console.log('[browser] Navigated:', await page.title().catch(() => url));
       }
 
-      if (cmd.type === 'tap') {
-        const x = Math.round(cmd.x);
-        const y = Math.round(cmd.y);
-        console.log(`[browser] Touch tap: ${x},${y}`);
-        await page.touchscreen.tap(x, y);
-      }
-
       if (cmd.type === 'action') {
         switch (cmd.key) {
           case 'Back':       await page.goBack();   break;
@@ -579,7 +572,25 @@ async function tryLaunch(proxyUrl) {
       await p.waitForTimeout(5000).catch(() => {});
     }
 
-    console.log(`[browser] ✓ Loaded via ${label}: "${title}" @ ${url}`);
+    // ── Second-pass check: verify subpage navigation also works ──
+    // Some proxies pass the root but Cloudflare 403s all subpages.
+    try {
+      await p.goto('https://shabiki.com/login', { waitUntil: 'domcontentloaded', timeout: 20000 });
+      const loginBody = await p.evaluate(() => document.body?.innerText || '').catch(() => '');
+      if (/you have been blocked/i.test(loginBody) || /Access denied/i.test(await p.title().catch(() => ''))) {
+        console.warn(`[browser] Proxy ${label} → Cloudflare blocks subpages — trying next proxy`);
+        try { await context.close(); } catch(_) {}
+        context_ref = null;
+        return null;
+      }
+      // Navigate back to homepage after the check
+      await p.goto('https://shabiki.com', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+    } catch(_) {
+      // Subpage check failed — still usable, just log it
+      console.warn(`[browser] Subpage check failed for ${label} (continuing anyway)`);
+    }
+
+    console.log(`[browser] ✓ Loaded via ${label}: "${title}" @ https://shabiki.com/`);
     return { context, page: p };
   } catch(e) {
     const msg = e.message || '';

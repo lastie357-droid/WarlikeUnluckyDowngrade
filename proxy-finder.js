@@ -19,8 +19,9 @@ const fs    = require('fs');
 const CACHE_FILE    = '/tmp/best-kenya-proxy.txt';
 const LIST_FILE     = '/tmp/kenya-proxies-working.txt';
 const CACHE_MAX_AGE = 25 * 60 * 1000;   // 25 min
-// Test against shabiki.com directly so only Cloudflare-passing proxies make it through
-const TEST_URL      = 'https://shabiki.com';
+// Test against a subpage — the root often passes even on blocked proxies,
+// but /login reveals whether Cloudflare will block navigation too
+const TEST_URL      = 'https://shabiki.com/login';
 const TEST_TIMEOUT  = 15;   // seconds (for curl)
 const MAX_PARALLEL  = 10;
 
